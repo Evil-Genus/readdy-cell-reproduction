@@ -1,68 +1,101 @@
-# ReaDDy-Cell
+# ReaDDy-Cell 论文工作与数值复现结果
 
-<img alt="Experiment-Simulation Model Diagram" src="docs/experiment_simulation_diagram.png" width="1080"/>
+记录时间：2026-11-10。本文档总结已经完成的数值模拟及其与论文的粗略对照
 
-**ReaDDy-Cell** is a whole-cell digital twin simulation framework built on the [ReaDDy](https://github.com/readdy/readdy) particle-based reaction-diffusion platform.
-This implementation enables simulation of mitochondrial dynamics and intracellular transport directly from 4D lattice light-sheet microscopy (LLSM) data.
-For full details, check out our preprint on BioxRiv! [_Whole-cell particle-based digital twin simulations from 4D lattice light-sheet microscopy data_](https://www.biorxiv.org/content/10.1101/2025.04.09.647865v1)
+## 1. 论文做了什么
 
-## Watch some Simulations
+论文：Eric Arkfeld 等，**Whole-cell particle-based digital twin simulations from 4D lattice light-sheet microscopy data**，*Cell* 189，4581–4593.e6（2026），[DOI: 10.1016/j.cell.2026.06.010](https://doi.org/10.1016/j.cell.2026.06.010)。官方代码：[schoeneberglab/readdy-cell](https://github.com/schoeneberglab/readdy-cell)。
 
-- [**Active Transport (Untreated Control)**](https://simularium.allencell.org/viewer?trajUrl=https%3A%2F%2Fdrive.google.com%2Ffile%2Fd%2F1eyHEDfp78OaL4IH4dEBkmvlNlrS67Hiy%2Fview%3Fusp%3Dsharing&t=0)
-- ️[**Intermediate Perturbation (Nocodazole 30 min)**](https://simularium.allencell.org/viewer?trajUrl=https%3A%2F%2Fdrive.google.com%2Ffile%2Fd%2F1onIzqaoLaGPEEPLcEFGhRwrXN1T_EyVO%2Fview%3Fusp%3Dsharing&t=0)
-- [**Passive Transport (Nocodazole 60 min)**](https://simularium.allencell.org/viewer?trajUrl=https%3A%2F%2Fdrive.google.com%2Ffile%2Fd%2F1Itki_n6GqYijhKW8ZrjxZqQV65l_JBae%2Fview%3Fusp%3Ddrive_link&t=0)
+论文尝试解决的问题是：活细胞成像可以记录线粒体和微管的三维动态，但观察本身难以单独改变马达活性或微管网络拓扑，也难以判定这些因素各自如何影响细胞器的位置。作者因此希望把真实细胞的空间结构转化成可运行、可扰动、能够与实验对照的细胞数字孪生。
 
-## Features
+方法流程如下：
 
-- **ReaDDy-Made-Models (RMM)**: Image-guided stochastic procedural generation method for
-  constructing particle-based models from imaging data.
-- **Automated Digital Twin Construction**: Factory methods for building spatially explicit, particle-based models of mitochondria, microtubules, plasma membrane, and nuclear membrane from live-cell imaging data.
-- **Passive & Active Transport Dynamics**: Simulates mitochondrial diffusion and directed motor-driven active transport along microtubule topologies.
-- **In-Browser Visualization**: Simulation trajectories are rendered using [Simularium](https://simularium.allencell.org).
+1. 使用 4D 晶格光片显微成像获取 Cal27 活细胞的线粒体、微管和细胞空间结构及动态信息。
+2. 将线粒体重建为粒子和连接组成的网络；依据图像信息生成微管网络，并加入细胞膜和细胞核边界。
+3. 在 ReaDDy 中设置扩散、空间排斥、线粒体融合与分裂，以及 dynein/kinesin 马达驱动的主动运输；利用实验观测与文献数据确定或校准模型参数。
+4. 向前运行随机粒子动力学，比较模拟与实验的线粒体运动、融合和分裂；再对马达动力学和微管拓扑做计算干预。
 
-## System Requirements
+模型的核心是**机制驱动的粒子反应扩散模拟**，没有神经网络训练过程。这里的“预测”是从给定结构和参数出发推演动态，而不是根据生成细胞预测完整未来状态。
 
-- **OS**: Ubuntu 20.04+
-- **Conda**: Miniconda or Anaconda
+## 2. 本次复现的范围与状态
 
-## Installation
+本次主要重跑论文主文 Fig.1–4 的**数值模拟**，并用现有结果与论文做粗略比较。未从原始显微影像重新分割、重建和标定全部模型；不需要全部实验统计的原始数据。
 
-1. Create and activate a conda environment:
+| 实验 | 已使用的输入 | 完成情况 |
+|---|---|---|
+| Fig.1 被动线粒体动态 | `noco60.pkl` | 1 次，模拟 120 秒 |
+| Fig.2 正常主动运输 | `control.pkl` | 1 次，模拟 120 秒 |
+| Fig.3 微管部分破坏 | `noco30.pkl`，沿用 control 动力学参数 | 1 次，模拟 120 秒 |
+| Fig.4 核周聚集和微管拓扑干预 | `control.pkl` 与 `control_bisected.pkl` | 3 个条件各 3 次，每次模拟 300 秒 |
 
-   ```bash
-   conda create -n readdy-cell python=3.11
-   conda activate readdy-cell
-   ```
+### 2.1 执行入口
 
-2. Install python and build dependencies:
+仓库模拟入口：`readdy_cell/main.py`。
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+Fig.4 的三个正常组轨迹使用原始代码得到，另外六个干预组轨迹使用记录在案的回调修复版。三次运行是同一初始细胞模型的独立随机模拟。Fig.1–3 各只有一次正式模拟。
 
-3. Set up conan for C++ dependencies:
+## 3. Fig.4：核周聚集与微管拓扑——主结果
 
-   ```bash
-   conan profile detect
-   ```
+### 3.1 论文的机制结论
 
-4. Compile the project:
+作者比较三种条件：（1）正常运输；（2）增强 dynein 偏向的逆向运输；（3）保持逆向运输设置，将每条微管从中点切断。论文指出，增强逆向运输使线粒体向核周聚集；当微管被切短后，即使仍有较强的逆向运输，核周聚集也被削弱。
 
-   ```bash
-   ./compile.sh
-   ```
+这支持一个机制假设：**微管长度和网络拓扑会限制马达驱动的长距离细胞器重定位**。
 
-5. Run the simulation:
+### 3.2 数值对比
 
-   ```bash
-   cd readdy_cell
-   python main.py
-   ```
+下表中的“本次”数值为每次 300 秒终态，先计算每个线粒体粒子到**最近核边界粒子中心**的欧氏距离，再对粒子和三次运行平均。论文列的是线粒体到核边界的平均距离；作者原始距离分析代码未取得，因此两列用于粗略比较，不应直接视为完全相同的测量口径。
 
-6. Visualize the trajectory:
+| 条件 | 本次平均距离（μm） | 论文报告均值（μm） | 粗略比较 |
+|---|---:|---:|---|
+| 正常运输 | **6.572** | **6.60** | 均值接近 |
+| 增强逆向运输 | **5.010** | **4.19** | 本次约高 0.82 μm |
+| 增强逆向运输＋切断微管 | **5.739** | **5.34** | 本次约高 0.40 μm |
 
-   Open [Simularium Visualizer](https://simularium.allencell.org/viewer) in your browser and drop the `.simularium` file onto the window to visualize.
+本次数值的两项趋势均与论文同向：
 
-## Acknowledgements
+- 正常 → 增强逆向运输：6.572 → 5.010 μm，平均距离下降，核周聚集增强。
+- 增强逆向运输 → 切断微管：5.010 → 5.739 μm，平均距离回升，聚集被削弱。
 
-ReaDDy-Cell builds upon the excellent work of the [ReaDDy project](https://github.com/readdy/readdy). We thank the original authors and contributors for making their software open-source and extensible.
+**结论：Fig.4 （主要结果）三项机制趋势得到复现，正常组均值接近论文**
+
+## 4. Fig.1–3：线粒体动力学的复现
+
+### 4.1 论文检验的结果
+
+- **Fig.1：**被动线粒体模型的片段 MSD、融合率和分裂率与成像实验比较。
+- **Fig.2：**加入微管及马达后的正常条件模型，与实验的相应动力学比较。
+- **Fig.3：**用 noco30 处理后影像重建的细胞结构，沿用 control 动力学参数，检查模拟能否预测部分微管破坏时的线粒体动态。论文正文报告运动性顺序为 **control > noco30 > noco60**。
+
+Fig.3 是基于**已经观察到的 noco30 结构**进行的跨条件动力学预测，不能解释为模型只接收药物名称便预测整个微管网络如何被破坏。
+
+### 4.2 片段质心 MSD
+
+本次使用每 1 秒保存的拓扑快照，提取线粒体连通分量；当片段粒子身份集合或内部连接发生变化时结束当前轨迹。对保留下来的每段轨迹，计算质心相对该段起点的位移平方，并在同一时延下对轨迹等权平均。
+
+| 时延（秒） | Fig.1 被动 noco60 | Fig.2 正常 control | Fig.3 部分破坏 noco30 |
+|---:|---:|---:|---:|
+| 11 | 0.093 | 0.170 | 0.144 |
+| 22 | 0.188 | 0.393 | 0.380 |
+| 33 | 0.302 | 0.678 | 0.514 |
+| 44 | 0.370 | 0.926 | 0.652 |
+| 55 | 0.450 | 1.154 | 0.807 |
+
+单位均为 **μm²**。这些时延下的顺序都是 **Fig.2 > Fig.3 > Fig.1**，与论文报告的运动性排序一致。44 秒时的有效片段轨迹数分别为 232、410、335；55 秒时分别为 210、381、291。不同条件的轨迹数量不同，不代表独立细胞数。
+
+论文图中 44 秒附近模拟曲线的图上粗读约为 Fig.1 **0.39–0.42**、Fig.2 **0.75–0.83**、Fig.3 **0.60–0.70 μm²**。因此本次 Fig.1 和 Fig.3 数值接近图上粗读范围，Fig.2 较高；这些都是从图形估读的近似值，不能代替作者源数据。论文图的横轴显示至 50 秒，表中 **55 秒仅为本次结果，不作同时间点论文对照**。
+
+### 4.3 融合和分裂事件
+
+按轨迹中的 `reaction_counts` 汇总仓库定义的 Fusion Reaction 1 和 Fission Reaction 1，得到单次 120 秒模拟的整细胞事件数；下表的频率为事件数除以 120 秒：
+
+| 条件 | 分裂次数 | 分裂频率（次/秒） | 融合次数 | 融合频率（次/秒） |
+|---|---:|---:|---:|---:|
+| Fig.1 被动 | 87 | 0.725 | 73 | 0.608 |
+| Fig.2 正常主动运输 | 130 | 1.083 | 97 | 0.808 |
+| Fig.3 部分微管破坏 | 122 | 1.017 | 89 | 0.742 |
+
+这些整段平均频率与论文图中宏观事件率的量级大致相近，但论文图展示的是**随时间变化的曲线**。不能据此断定曲线完全吻合。
+
+**当前结论：Fig.1–3 的粗略 MSD 排序与论文一致，事件频率量级相近**
+
